@@ -53,7 +53,6 @@ public class MatrixOperations {
         for (int i = 0; i < result.length; i++) {
             result[i] = addVectors(param1[i], param2[i], const1, const2);
         }
-        System.out.println("result = " + result);
         return result;
     }
 
@@ -80,8 +79,6 @@ public class MatrixOperations {
      * @return добуток матриць, розмірність - nxn
      */
     public static int[][] multMatrix(int[][] param1, int[][] param2) {
-        System.out.println("param1 = " + formattedDeepToString(param1));
-        System.out.println("param2 = " + formattedDeepToString(param2));
         if (param1[0].length != param2.length) {
             System.out.println("Нельзя умножать матрицы, количество элементов в строке которой не равно кол-ву столбцов в другой");
             return null;
@@ -90,7 +87,7 @@ public class MatrixOperations {
         for (int k = 0; k < param1.length; k++) {
             for (int i = 0; i < param1[0].length; i++) {
                 for (int j = 0; j < param2.length; j++) {
-                    result[k][i] += param1[k][j] * param2[j][i]; //TODO: перепроверить правильно ли считает - вроде норм!
+                    result[k][i] += param1[k][j] * param2[j][i];
                 }
             }
         }
@@ -112,4 +109,20 @@ public class MatrixOperations {
         }
         return result;
     }
+
+    /**
+     * Метод выполняет обрезку строк матрицы. Возвращает строки в matrixToTruncate начиная с offset количеством rowCount
+     *
+     * @param matrixToTruncate матрица, с которой будут вырезаны строки
+     * @param offset           номер строки, с которой будет выполнена обрезка
+     * @param rowCount         количество строк
+     * @return матрица, количество строк которой = rowCount и строки идентичны строкам в matrixToTruncate начиная с
+     * offset позиции
+     */
+    public static int[][] truncateMatrix(int[][] matrixToTruncate, int offset, int rowCount) {
+        int result[][] = new int[rowCount][];
+        System.arraycopy(matrixToTruncate, offset, result, 0, rowCount);
+        return result;
+    }
+
 }
