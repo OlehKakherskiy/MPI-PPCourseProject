@@ -1,4 +1,4 @@
-import mpi.*;
+import mpi.MPI;
 
 import java.util.Arrays;
 
@@ -6,7 +6,7 @@ public class Main {
 
     private static int[][] MA, MB, MO, MC, MK;
     private static int[] Z;
-    private static int a, minZ, N, H;
+    public static int a, minZ, N, H;
     private static int p;
 
     public static void main(String[] args) {
@@ -30,36 +30,42 @@ public class Main {
         // (необходимо для передачи данных), таким образом реализовываем гиперкуб
         MPI.COMM_WORLD.Create_graph(GraphTopology.calculateIndexes(power, size), GraphTopology.calculateEdges(power, size), false);
 
-        //определяем смещения
+        //ввод данных
+        initData(rank);
+
+        int[] indexCount = getEachCount(size);
         int[] displacement = getEachOffset(size);
 
-        //определяем количество элементов
-        int[] indexCount = getEachCount(size);
+        if (rank == 0 || rank == p) {
+            //устанавливаем метаданные для упаковки данных
+            DataPackBuilder.setMetadata(size, getEachCount(size), getEachOffset(size));
+        }
 
-        //ввод данных
-        initData(rank, indexCount);
-
+        DataPack[] packs = rank == p ? DataPackBuilder.packData(MC, MK, Z, 0, false) : new DataPack[1];
+        int[] packIndexCount = new int[size];
+        Arrays.fill(packIndexCount, 1);
+        int[] packDisplacement = new int[size];
+        for (int i = 1; i < packDisplacement.length; i++) {
+            packDisplacement[i] = packDisplacement[i - 1] + 1;
+        }
         //получение/отправка данных с последнего процесса
-        MPI.COMM_WORLD.Scatterv(Z, 0, indexCount, displacement, MPI.INT, Z, 0, indexCount[rank], MPI.INT, size - 1);
-        MPI.COMM_WORLD.Scatterv(MC, 0, indexCount, displacement, MPI.OBJECT, MC, 0, indexCount[rank], MPI.OBJECT, size - 1);
-        MPI.COMM_WORLD.Scatterv(MK, 0, indexCount, displacement, MPI.OBJECT, MK, 0, indexCount[rank], MPI.OBJECT, size - 1);
+        MPI.COMM_WORLD.Scatterv(packs, 0, packIndexCount, packDisplacement, MPI.OBJECT, packs, 0, packIndexCount[rank], MPI.OBJECT, size - 1);
 
         //получение/отправка данных с первого процесса
-        int ar[] = {a};
-        MPI.COMM_WORLD.Bcast(ar, 0, 1, MPI.INT, 0);
-        a = ar[0];
-        MPI.COMM_WORLD.Bcast(MB, 0, N, MPI.OBJECT, 0);
-        MPI.COMM_WORLD.Scatterv(MO, 0, indexCount, displacement, MPI.OBJECT, MO, 0, indexCount[rank], MPI.OBJECT, 0);
+        DataPack[] packs1 = rank == 0 ? DataPackBuilder.packData(MB, MO, null, a, true) : new DataPack[1];
 
-        // обрезка элементов в векторах и строк в матрицах в процессах p и 0 - отсавляем только нужные для работы
-        // (остальные расшарены по другим процессам)
-        if (rank == p) {
-            Z = Arrays.copyOfRange(Z, Z.length - H, Z.length);
-            MC = MatrixOperations.truncateMatrix(MC, N - H, H);
-            MK = MatrixOperations.truncateMatrix(MK, N - H, H);
-        } else if (rank == 0) {
-            MO = MatrixOperations.truncateMatrix(MO, 0, indexCount[0]);
-        }
+        MPI.COMM_WORLD.Scatterv(packs1, 0, packIndexCount, packDisplacement, MPI.OBJECT, packs1, 0, packIndexCount[rank], MPI.OBJECT, 0);
+
+        //распаковка данных с 0 процесса
+        MO = packs1[0].getMatrix2();
+        MB = packs1[0].getMatrix1();
+        a = packs1[0].getConstant();
+
+        //распаковка данных с p процесса
+        DataPack pack = rank == p ? packs[p] : packs[0];
+        MC = pack.getMatrix1();
+        MK = pack.getMatrix2();
+        Z = pack.getVector();
 
         //вычисление локальных минимумов
         int[] localMinimums = new int[1];
@@ -90,29 +96,20 @@ public class Main {
         MPI.Finalize();
     }
 
-    //TODO: 3. упаковка/распаковка
 
-    private static void initData(int rank, int[] indexCount) {
+    //TODO: рефакторинг
+    //TODO: попытаться сделать одновременную посылку - так быстрее будет
+
+    private static void initData(int rank) {
         if (rank == 0) {
             MB = MatrixOperations.inputMatrix(N);
             MO = MatrixOperations.inputMatrix(N);
             a = MatrixOperations.inputConstant();
-            MC = new int[indexCount[rank]][N];
-            MK = new int[indexCount[rank]][N];
-            Z = new int[indexCount[rank]];
 
         } else if (rank == p) {
             MC = MatrixOperations.inputMatrix(N);
             MK = MatrixOperations.inputMatrix(N);
             Z = MatrixOperations.inputVector(N);
-            MB = new int[N][N];
-            MO = new int[H][N];
-        } else {
-            MB = new int[N][N];
-            MO = new int[H][N];
-            MC = new int[H][N];
-            MK = new int[H][N];
-            Z = new int[H];
         }
     }
 

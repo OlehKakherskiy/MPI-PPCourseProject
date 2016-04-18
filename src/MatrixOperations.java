@@ -26,9 +26,8 @@ public class MatrixOperations {
      */
     public static int[] inputVector(int n) {
         int[] result = new int[n];
-        int start = 4;
         for (int i = 0; i < result.length; i++) {
-            result[i] = start + i;
+            result[i] = 1;
         }
         return result;
     }
