@@ -41,31 +41,56 @@ public class Main {
             DataPackBuilder.setMetadata(size, getEachCount(size), getEachOffset(size));
         }
 
-        DataPack[] packs = rank == p ? DataPackBuilder.packData(MC, MK, Z, 0, false) : new DataPack[1];
-        int[] packIndexCount = new int[size];
-        Arrays.fill(packIndexCount, 1);
-        int[] packDisplacement = new int[size];
-        for (int i = 1; i < packDisplacement.length; i++) {
-            packDisplacement[i] = packDisplacement[i - 1] + 1;
+        //упаковываем данные для отправки
+        DataPack[] sendPacks;
+        if (rank == 0)
+            sendPacks = DataPackBuilder.packData(MB, MO, null, a, true);
+        else if (rank == p)
+            sendPacks = DataPackBuilder.packData(MC, MK, Z, 0, false);
+        else sendPacks = new DataPack[0];
+
+        //указываем кол-во отсылаемых элементов каждому процессу (1 и последний процесс отсылают по пакету на процесс,
+        // остальные - не отсылают данные)
+        int[] sendCount = new int[size];
+
+        //смещение в отсылаемом буффере для каждого процесса
+        int[] sendDisplacement = new int[size];
+
+        if (rank == 0 || rank == p) {
+
+            //1 и последний процесс отсылают по пакету на процесс
+            Arrays.fill(sendCount, 1);
+            //указываем смещение в пакетах (1 процесс начиная с 0 позиции получает 1 пакет, 2 - начиная с первой
+            // позиции получает 1 пакет и тд)
+            for (int i = 0; i < sendDisplacement.length; i++) {
+                sendDisplacement[i] = i;
+            }
         }
-        //получение/отправка данных с последнего процесса
-        MPI.COMM_WORLD.Scatterv(packs, 0, packIndexCount, packDisplacement, MPI.OBJECT, packs, 0, packIndexCount[rank], MPI.OBJECT, size - 1);
 
-        //получение/отправка данных с первого процесса
-        DataPack[] packs1 = rank == 0 ? DataPackBuilder.packData(MB, MO, null, a, true) : new DataPack[1];
+        int[] receiveCount = new int[size];
+        receiveCount[0] = 1;
+        receiveCount[p] = 1;
 
-        MPI.COMM_WORLD.Scatterv(packs1, 0, packIndexCount, packDisplacement, MPI.OBJECT, packs1, 0, packIndexCount[rank], MPI.OBJECT, 0);
+        int[] receiveDisplacement = new int[size];
+        receiveDisplacement[0] = 0;
+        receiveDisplacement[p] = 1;
+
+        // массив полученых пакетов
+        DataPack[] receivePacks = new DataPack[2];
+
+        MPI.COMM_WORLD.Alltoallv(sendPacks, 0, sendCount, sendDisplacement, MPI.OBJECT,
+                receivePacks, 0, receiveCount, receiveDisplacement, MPI.OBJECT);
 
         //распаковка данных с 0 процесса
-        MO = packs1[0].getMatrix2();
-        MB = packs1[0].getMatrix1();
-        a = packs1[0].getConstant();
+        MO = receivePacks[0].getMatrix2();
+        MB = receivePacks[0].getMatrix1();
+        a = receivePacks[0].getConstant();
 
         //распаковка данных с p процесса
-        DataPack pack = rank == p ? packs[p] : packs[0];
-        MC = pack.getMatrix1();
-        MK = pack.getMatrix2();
-        Z = pack.getVector();
+        MC = receivePacks[1].getMatrix1();
+        MK = receivePacks[1].getMatrix2();
+        Z = receivePacks[1].getVector();
+
 
         //вычисление локальных минимумов
         int[] localMinimums = new int[1];
@@ -74,7 +99,7 @@ public class Main {
         //вычисление глобального минимума
         MPI.COMM_WORLD.Reduce(localMinimums, 0, localMinimums, 0, 1, MPI.INT, MPI.MIN, p);
 
-        //расшаривание глобального минимума
+//        расшаривание глобального минимума
         MPI.COMM_WORLD.Bcast(localMinimums, 0, 1, MPI.INT, p);
         minZ = localMinimums[0];
 
@@ -95,10 +120,6 @@ public class Main {
         System.out.println("Process " + rank + " is finished");
         MPI.Finalize();
     }
-
-
-    //TODO: рефакторинг
-    //TODO: попытаться сделать одновременную посылку - так быстрее будет
 
     private static void initData(int rank) {
         if (rank == 0) {
