@@ -1,7 +1,13 @@
+import mpi.Graphcomm;
 import mpi.MPI;
 
 import java.util.Arrays;
 
+/**
+ * Математичне завдання: MA = MB(MC+MO)a+min(Z)*MK
+ * Бібліотека: MPI
+ * Виконав: Кахерський О.І., ІП-31, ФІОТ
+ */
 public class Main {
 
     private static int[][] MA, MB, MO, MC, MK;
@@ -10,25 +16,35 @@ public class Main {
     private static int p;
 
     public static void main(String[] args) {
-
+        long startTime = System.currentTimeMillis();
+        long endTime = 0;
         MPI.Init(args);
 
-        long startTime = System.currentTimeMillis();
         int rank = MPI.COMM_WORLD.Rank();
         int size = MPI.COMM_WORLD.Size();
-
-        System.out.println("Process " + rank + " is started");
 
         //определяем размерность матриц - передана как последний параметр командной строки
         N = Integer.parseInt(args[args.length - 1]);
         H = N / size;
         p = size - 1;
 
+        if (size == 1) {
+            initData(rank);
+            MA = MatrixOperations.addMatrix(
+                    MatrixOperations.multMatrix(MatrixOperations.addMatrix(MC, MO, 1, 1), MB), MK, a, minZ);
+            if (MA.length <= 16)
+                System.out.println(MatrixOperations.formattedDeepToString(MA));
+            System.out.println("Computation time (sec): " + ((System.currentTimeMillis() - startTime) / 1000.0));
+            return;
+        }
+
+        System.out.println("Process " + rank + " is started");
+
         int power = (int) (Math.log(size) / Math.log(2)); //степень каждой вершины
 
         //создаем топологию на основе глобального коммуникатора - каждый процесс будет знать своих соседей
         // (необходимо для передачи данных), таким образом реализовываем гиперкуб
-        MPI.COMM_WORLD.Create_graph(GraphTopology.calculateIndexes(power, size), GraphTopology.calculateEdges(power, size), false);
+        Graphcomm graphcomm = MPI.COMM_WORLD.Create_graph(GraphTopology.calculateIndexes(power, size), GraphTopology.calculateEdges(power, size), false);
 
         //ввод данных
         initData(rank);
@@ -77,10 +93,8 @@ public class Main {
 
         // массив полученых пакетов
         DataPack[] receivePacks = new DataPack[2];
-
-        MPI.COMM_WORLD.Alltoallv(sendPacks, 0, sendCount, sendDisplacement, MPI.OBJECT,
+        graphcomm.Alltoallv(sendPacks, 0, sendCount, sendDisplacement, MPI.OBJECT,
                 receivePacks, 0, receiveCount, receiveDisplacement, MPI.OBJECT);
-
         //распаковка данных с 0 процесса
         MO = receivePacks[0].getMatrix2();
         MB = receivePacks[0].getMatrix1();
@@ -96,26 +110,27 @@ public class Main {
         int[] localMinimums = new int[1];
         localMinimums[0] = MatrixOperations.min(Z, 0, Z.length);
 
+        long s1 = System.currentTimeMillis();
         //вычисление глобального минимума
-        MPI.COMM_WORLD.Reduce(localMinimums, 0, localMinimums, 0, 1, MPI.INT, MPI.MIN, p);
+        graphcomm.Reduce(localMinimums, 0, localMinimums, 0, 1, MPI.INT, MPI.MIN, p);
 
-//        расшаривание глобального минимума
-        MPI.COMM_WORLD.Bcast(localMinimums, 0, 1, MPI.INT, p);
+        //расшаривание глобального минимума
+        graphcomm.Bcast(localMinimums, 0, 1, MPI.INT, p);
         minZ = localMinimums[0];
-
         //вычисление частичных результатов задания
         MA = MatrixOperations.addMatrix(
                 MatrixOperations.multMatrix(MatrixOperations.addMatrix(MC, MO, 1, 1), MB), MK, a, minZ);
 
         //сборка частичных результатов мат. выражения со всех процессов в процесс 0
         int[][] result = new int[N][];
-        MPI.COMM_WORLD.Gatherv(MA, 0, indexCount[rank], MPI.OBJECT, result, 0, indexCount, displacement, MPI.OBJECT, 0);
+        graphcomm.Gatherv(MA, 0, indexCount[rank], MPI.OBJECT, result, 0, indexCount, displacement, MPI.OBJECT, 0);
 
         //вывод результатов на экран и завершение работы
         if (rank == 0) {
             if (result.length <= 16)
                 System.out.println(MatrixOperations.formattedDeepToString(result));
-            System.out.println("Computation time (sec): " + ((System.currentTimeMillis() - startTime) / 1000.0));
+            endTime = System.currentTimeMillis();
+            System.out.println("Computation time (sec): " + ((endTime - startTime) / 1000.0));
         }
         System.out.println("Process " + rank + " is finished");
         MPI.Finalize();
@@ -127,7 +142,8 @@ public class Main {
             MO = MatrixOperations.inputMatrix(N);
             a = MatrixOperations.inputConstant();
 
-        } else if (rank == p) {
+        }
+        if (rank == p) {
             MC = MatrixOperations.inputMatrix(N);
             MK = MatrixOperations.inputMatrix(N);
             Z = MatrixOperations.inputVector(N);
